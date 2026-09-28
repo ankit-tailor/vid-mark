@@ -3,8 +3,9 @@ import {
   broadcast,
   sendToPage,
   type BackgroundRequest,
+  type FrameRequest,
 } from '@/lib/messaging';
-import type { Note, NoteMeta, VideoMeta } from '@/lib/types';
+import type { Note, NoteMeta, VideoMeta, VideoState } from '@/lib/types';
 
 /**
  * Service worker: storage owner + command router.
@@ -63,7 +64,10 @@ const newId = () =>
 
 // --- message routing -------------------------------------------------------
 
-async function handle(msg: BackgroundRequest): Promise<unknown> {
+async function handle(
+  msg: BackgroundRequest,
+  sender: chrome.runtime.MessageSender
+): Promise<unknown> {
   switch (msg.type) {
     case 'notes:add': {
       const notes = await readNotes(msg.key);
@@ -108,11 +112,30 @@ async function handle(msg: BackgroundRequest): Promise<unknown> {
       broadcast({ type: 'page:changed', state: msg.state });
       return { ok: true };
     }
+
+    case 'frame:video': {
+      // Sent to every frame in the tab: only the frame agent listens for this
+      // type, and it only runs inside Drive's player, so at most one answers.
+      const tabId = sender.tab?.id;
+      if (tabId === undefined) return null;
+      const req: FrameRequest = { type: 'frame:video', op: msg.op, t: msg.t };
+      return chrome.tabs
+        .sendMessage<FrameRequest, VideoState | null>(tabId, req)
+        .then((r) => r ?? null)
+        .catch(() => null);
+    }
+
+    case 'frame:compose': {
+      // The shortcut pressed while the player frame had focus. The composer
+      // lives in the top frame, so route it there.
+      if (sender.tab?.id !== undefined) await compose(sender.tab.id);
+      return { ok: true };
+    }
   }
 }
 
-chrome.runtime.onMessage.addListener((msg: BackgroundRequest, _sender, respond) => {
-  handle(msg).then(respond, (err) => respond({ ok: false, error: String(err) }));
+chrome.runtime.onMessage.addListener((msg: BackgroundRequest, sender, respond) => {
+  handle(msg, sender).then(respond, (err) => respond({ ok: false, error: String(err) }));
   return true; // async respond
 });
 
@@ -128,13 +151,21 @@ chrome.runtime.onMessage.addListener((msg: BackgroundRequest, _sender, respond) 
 async function compose(tabId: number): Promise<void> {
   if (await sendToPage(tabId, 'page:compose', {})) return;
 
-  const files = chrome.runtime.getManifest().content_scripts?.[0]?.js;
-  if (!files?.length) return;
+  const [page, agent] = chrome.runtime.getManifest().content_scripts ?? [];
+  if (!page?.js?.length) return;
 
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, files });
+    await chrome.scripting.executeScript({ target: { tabId }, files: page.js });
   } catch {
     return; // chrome://, the Web Store, the PDF viewer — nothing to annotate
+  }
+  // A Drive tab that predates the extension has no agent in its player frame
+  // either. The agent checks its own URL and does nothing anywhere else, so
+  // injecting it into every frame is safe.
+  if (agent?.js?.length) {
+    await chrome.scripting
+      .executeScript({ target: { tabId, allFrames: true }, files: agent.js })
+      .catch(() => {});
   }
   await sendToPage(tabId, 'page:compose', {});
 }

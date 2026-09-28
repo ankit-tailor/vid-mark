@@ -149,8 +149,12 @@ function CurrentView({
                 ))}{' '}
                 while watching to drop a note at the current frame.
               </>
+            ) : state?.adapter === 'drive' ? (
+              // Drive's preview overlay has no file id in the URL and opens
+              // without a navigation, so only the file's own page is supported.
+              'Previews on Drive aren’t supported yet — open the video’s own file link (drive.google.com/file/d/…) and the panel will pick it up.'
             ) : (
-              'Open a YouTube, Loom, X, or LinkedIn video — or any page with a video — and the panel will pick it up.'
+              'Open a YouTube, Loom, X, LinkedIn, or Google Drive video — or any page with a video — and the panel will pick it up.'
             )}
           </EmptyDescription>
         </EmptyHeader>

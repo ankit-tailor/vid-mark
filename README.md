@@ -3,7 +3,7 @@
 Timestamped feedback on any video in your browser. Watch, hit `⌘⇧K`, type, keep
 watching. Export the whole set as a paste-ready list of comments with deep links.
 
-**Scope:** YouTube · Loom · X · LinkedIn · your own web app · local files · any
+**Scope:** YouTube · Loom · X · LinkedIn · Google Drive · your own web app · local files · any
 HTML5 `<video>`, including ones inside a web component's shadow root.
 Notes are stored locally in `chrome.storage.local` — no account, no backend.
 
@@ -62,6 +62,8 @@ src/
   background/worker.ts   sole owner of chrome.storage; command routing
   content/
     adapters.ts          per-site: find video, stable identity key, deep link
+    video.ts             one handle for a local <video> or one in another frame
+    frame-agent.ts       runs inside Drive's player frame; answers for its video
     index.tsx            shadow-root mount, page state, seek, SPA navigation
     composer-store.ts    external store bridging chrome events → React
     Composer.tsx         the notes rail + toasts
