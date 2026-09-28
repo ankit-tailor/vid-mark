@@ -1,4 +1,11 @@
-import type { Note, NoteDraft, NoteMeta, PageState, VideoMeta } from './types';
+import type {
+  Note,
+  NoteDraft,
+  NoteMeta,
+  PageState,
+  VideoMeta,
+  VideoState,
+} from './types';
 
 /**
  * Typed message contracts.
@@ -6,6 +13,9 @@ import type { Note, NoteDraft, NoteMeta, PageState, VideoMeta } from './types';
  * Two directions, deliberately kept apart:
  *   background — anything that touches storage. Sent with chrome.runtime.
  *   page       — anything that touches the video. Sent with chrome.tabs.
+ *   frame      — a video in a cross-origin child frame (Drive). Content
+ *                scripts cannot reach sibling frames, so the top frame asks
+ *                the worker, which relays to the frame agent.
  *
  * Broadcasts flow one way only: background → side panel.
  */
@@ -27,7 +37,18 @@ type BackgroundContract = {
   'notes:clear': { req: { key: string }; res: { ok: boolean } };
   'index:list': { req: Record<string, never>; res: { videos: VideoMeta[] } };
   'page:navigated': { req: { state: PageState }; res: { ok: boolean } };
+  'frame:video': { req: { op: VideoOp; t?: number }; res: VideoState | null };
+  'frame:compose': { req: Record<string, never>; res: { ok: boolean } };
 };
+
+/**
+ * Every op answers with the state *after* it ran, or null when no frame agent
+ * is listening — the player frame hasn't loaded, or this page has none.
+ */
+export type VideoOp = 'state' | 'pause' | 'play' | 'seek';
+
+/** Worker → frame agent. Only the agent listens for this type. */
+export type FrameRequest = { type: 'frame:video'; op: VideoOp; t?: number };
 
 type PageContract = {
   'page:state': { req: Record<string, never>; res: PageState };

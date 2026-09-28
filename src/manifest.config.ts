@@ -40,6 +40,16 @@ export default defineManifest({
       run_at: 'document_idle',
       all_frames: false,
     },
+    // Drive's video player is a cross-origin youtube.googleapis.com frame the
+    // script above cannot reach. This one runs inside it and answers for the
+    // video by message; it checks it is inside Drive before doing anything.
+    // The worker relies on this staying the second entry.
+    {
+      matches: ['https://youtube.googleapis.com/embed/*'],
+      js: ['src/content/frame-agent.ts'],
+      run_at: 'document_idle',
+      all_frames: true,
+    },
   ],
 
   commands: {

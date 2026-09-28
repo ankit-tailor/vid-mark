@@ -21,6 +21,11 @@ export interface Adapter {
   title(): string;
   deepLink(t: number): string;
   hideChrome(video: HTMLVideoElement | null): () => void;
+  /**
+   * The video plays in a cross-origin child frame, where `findVideo()` cannot
+   * see it. The frame agent (`frame-agent.ts`) answers for it instead.
+   */
+  remote?: boolean;
 }
 
 /**
@@ -275,7 +280,49 @@ const linkedin: Adapter = {
   hideChrome: () => () => {},
 };
 
-const ALL: Adapter[] = [youtube, loom, twitter, linkedin, generic];
+function driveFileId(): string | null {
+  const u = new URL(location.href);
+  // /file/d/<id>/view, and /file/u/<n>/d/<id>/view when signed into several
+  // accounts — the account index is not part of the file's identity.
+  const m = u.pathname.match(/^\/file\/(?:u\/\d+\/)?d\/([\w-]+)/);
+  if (m) return m[1];
+  return u.pathname === '/open' ? u.searchParams.get('id') : null;
+}
+
+/**
+ * Drive plays video in a youtube.googleapis.com embed whose URL carries only an
+ * opaque token, never the file id. So identity, title and links come from the
+ * Drive page, and the video itself is driven through the frame agent.
+ */
+const drive: Adapter = {
+  id: 'drive',
+  label: 'Google Drive',
+  matches: () => location.hostname === 'drive.google.com',
+  findVideo: largestVideo,
+  remote: true,
+
+  key() {
+    const id = driveFileId();
+    return id ? `drive:${id}` : generic.key();
+  },
+
+  title() {
+    return document.title.replace(/\s*-\s*Google Drive\s*$/i, '').trim();
+  },
+
+  deepLink(t) {
+    const id = driveFileId();
+    // NOTE: Drive's `?t=` param is seconds. Unverified against a live file —
+    // if timestamps come back ignored, this one line is the fix.
+    return id
+      ? `https://drive.google.com/file/d/${id}/view?t=${Math.floor(t)}`
+      : generic.deepLink(t);
+  },
+
+  hideChrome: () => () => {},
+};
+
+const ALL: Adapter[] = [youtube, loom, twitter, linkedin, drive, generic];
 
 export function resolveAdapter(): Adapter {
   return ALL.find((a) => a.matches()) ?? generic;

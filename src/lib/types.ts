@@ -3,6 +3,7 @@ export type AdapterId =
   | 'loom'
   | 'twitter'
   | 'linkedin'
+  | 'drive'
   | 'generic';
 
 export interface Note {
@@ -34,6 +35,13 @@ export interface PageState {
   url: string;
   duration: number | null;
   currentTime: number;
+}
+
+/** Playback snapshot of a video the content script can't hold directly. */
+export interface VideoState {
+  currentTime: number;
+  duration: number | null;
+  paused: boolean;
 }
 
 export type NoteDraft = Pick<Note, 't' | 'text' | 'link'>;

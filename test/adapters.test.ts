@@ -45,6 +45,7 @@ test('routes each host to its adapter', () => {
   assert.equal(at('https://x.com/jack/status/20').id, 'twitter');
   assert.equal(at('https://twitter.com/jack/status/20').id, 'twitter');
   assert.equal(at('https://www.linkedin.com/feed/').id, 'linkedin');
+  assert.equal(at('https://drive.google.com/file/d/1pb4vftt/view').id, 'drive');
   assert.equal(at('https://app.example.com/clips/42').id, 'generic');
   assert.equal(at('file:///Users/a/Movies/demo.mp4').id, 'generic');
 });
@@ -71,6 +72,19 @@ test('linkedin keys off the activity urn in any URL shape', () => {
 
   assert.equal(new Set(keys).size, 1, `keys diverged: ${keys.join(', ')}`);
   assert.equal(keys[0], 'linkedin:7123456789012345678');
+});
+
+test('drive keys off the file id, not the sharing noise', () => {
+  const keys = [
+    'https://drive.google.com/file/d/1pb4vfttEDTxh3PJLOH35s71GrhZwZ6Me/view?usp=sharing',
+    'https://drive.google.com/file/d/1pb4vfttEDTxh3PJLOH35s71GrhZwZ6Me/view',
+    // Signed into several accounts, Drive slots the account index in.
+    'https://drive.google.com/file/u/1/d/1pb4vfttEDTxh3PJLOH35s71GrhZwZ6Me/view',
+    'https://drive.google.com/open?id=1pb4vfttEDTxh3PJLOH35s71GrhZwZ6Me',
+  ].map((href) => at(href).key);
+
+  assert.equal(new Set(keys).size, 1, `keys diverged: ${keys.join(', ')}`);
+  assert.equal(keys[0], 'drive:1pb4vfttEDTxh3PJLOH35s71GrhZwZ6Me');
 });
 
 test('one video keeps one key across every URL shape', () => {
@@ -120,6 +134,10 @@ test('deep links use each site’s own timestamp format', () => {
     at('https://app.example.com/clips/42').link,
     'https://app.example.com/clips/42#t=83'
   );
+  assert.equal(
+    at('https://drive.google.com/file/u/1/d/1pb4vftt/view?usp=sharing').link,
+    'https://drive.google.com/file/d/1pb4vftt/view?t=83'
+  );
   // X and LinkedIn have no timestamp parameter at all, so the fragment is
   // inert — the link opens the post, and the note text carries the time.
   assert.equal(
@@ -148,6 +166,11 @@ test('titles drop site suffixes', () => {
   assert.equal(
     at('https://www.linkedin.com/feed/', 'Q3 Demo | LinkedIn').title,
     'Q3 Demo'
+  );
+  assert.equal(
+    at('https://drive.google.com/file/d/1pb4vftt/view', 'q3-demo.mp4 - Google Drive')
+      .title,
+    'q3-demo.mp4'
   );
   // No tweetText element in this stub, so it falls back to the page title.
   assert.equal(

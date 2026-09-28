@@ -6,6 +6,7 @@ import type { Note, PageState } from "@/lib/types";
 import { resolveAdapter } from "./adapters";
 import { composerStore } from "./composer-store";
 import { ContentRoot } from "./Composer";
+import { findVideo } from "./video";
 
 /**
  * Content script entry point.
@@ -92,30 +93,36 @@ mountUi();
 // --- page state ------------------------------------------------------------
 
 /** Snapshot of the page for the side panel. A null video is a valid answer. */
-function pageState(): PageState {
-  const video = adapter.findVideo();
+async function pageState(): Promise<PageState> {
+  const found = await findVideo(adapter);
   return {
-    hasVideo: !!video,
+    hasVideo: !!found,
     adapter: adapter.id,
     adapterLabel: adapter.label,
     key: adapter.key(),
     title: adapter.title(),
     url: location.href,
-    duration: video && isFinite(video.duration) ? video.duration : null,
-    currentTime: video ? video.currentTime : 0,
+    duration: found?.state.duration ?? null,
+    currentTime: found?.state.currentTime ?? 0,
   };
 }
 
 async function startComposer(): Promise<void> {
-  const video = adapter.findVideo();
-  if (!video) {
+  if (composerStore.isOpen()) return;
+  const found = await findVideo(adapter);
+  if (!found) {
     composerStore.toast("No video found on this page");
     return;
   }
+  // Finding a video in another frame is a round trip; the other entry path
+  // (command vs. chord) may have opened the composer meanwhile.
   if (composerStore.isOpen()) return;
 
-  const wasPlaying = !video.paused;
-  if (wasPlaying) video.pause();
+  const { video } = found;
+  const wasPlaying = !found.state.paused;
+  // Pausing reports where playback actually stopped, which is a moment later
+  // than the state we found it in.
+  const state = (wasPlaying && (await video.pause())) || found.state;
 
   // Snapshot identity now. A client-side route change while the composer is
   // open would otherwise file the note against whatever video loaded next.
@@ -124,7 +131,7 @@ async function startComposer(): Promise<void> {
     title: adapter.title(),
     url: location.href,
     adapter: adapter.id,
-    duration: isFinite(video.duration) ? video.duration : null,
+    duration: state.duration,
   };
 
   // The rail leads with the notes already on this video, so they are read
@@ -138,12 +145,12 @@ async function startComposer(): Promise<void> {
 
   composerStore.open({
     notes,
-    startTime: video.currentTime,
+    startTime: state.currentTime,
     onSeek: (t) => {
-      video.currentTime = t;
+      void video.seek(t);
     },
     onDismiss: () => {
-      if (wasPlaying) void video.play().catch(() => {});
+      if (wasPlaying) void video.play();
     },
     // The timestamp comes from the caller, not from open time: the rail stays
     // up across saves, and clicking a note seeks the video underneath it.
@@ -183,24 +190,25 @@ window.addEventListener(
 chrome.runtime.onMessage.addListener((msg: PageRequest, _sender, respond) => {
   switch (msg.type) {
     case "page:state":
-      respond(pageState());
-      break;
+      void pageState().then(respond);
+      return true; // async respond
 
     case "page:compose":
       void startComposer();
       respond({ ok: true });
-      break;
+      return false;
 
-    case "page:seek": {
-      const video = adapter.findVideo();
-      if (video) {
-        video.currentTime = msg.t;
-        video.scrollIntoView({ block: "center", behavior: "smooth" });
-      }
-      respond({ ok: !!video });
-      break;
-    }
+    case "page:seek":
+      void findVideo(adapter).then(async (found) => {
+        if (found) {
+          await found.video.seek(msg.t);
+          found.video.reveal();
+        }
+        respond({ ok: !!found });
+      });
+      return true; // async respond
   }
+  // Anything else — the frame agent's `frame:video` — is not ours to answer.
   return false;
 });
 
@@ -217,7 +225,9 @@ let lastHref = location.href;
 function onNavigated(): void {
   lastHref = location.href;
   if (composerStore.isOpen()) composerStore.close();
-  void sendToBackground("page:navigated", { state: pageState() });
+  void pageState().then((state) =>
+    sendToBackground("page:navigated", { state }),
+  );
 }
 
 window.addEventListener("yt-navigate-finish", onNavigated);
